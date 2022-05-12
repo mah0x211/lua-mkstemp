@@ -58,7 +58,6 @@ jobs:
       run: |
         sudo apt install lcov -y
         luarocks install assert
-        luarocks install errno
     -
       name: Run Test
       run: |

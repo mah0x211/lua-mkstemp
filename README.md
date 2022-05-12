@@ -16,7 +16,28 @@ luarocks install mkstemp
 ```lua
 local mkstemp = require('mkstemp')
 local pathname = '/tmp/lua_XXXXXX'
-local f, err, errno = mkstemp(pathname)
+local f, err = mkstemp(pathname)
 assert(f, err)
 print(pathname) -- /tmp/lua_Wo6kHb
 ```
+
+
+## Error Handling
+
+the following functions return the `error` object created by https://github.com/mah0x211/lua-errno module.
+
+
+## f, err = mkstemp( tmpl )
+
+this function takes the given file name template `tmpl` and overwrites a portion of it to create a file name and the template file.
+
+see `man mkstemp` for more details.
+
+**Parameters**
+
+- `tmpl:string`: filename template.
+
+**Returns**
+
+- `f:file`: a lua file handle.
+- `err:error`: `error` object on failure.
