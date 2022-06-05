@@ -4,17 +4,25 @@ local errno_set = require('errno.set')
 local mkstemp = require('mkstemp')
 
 -- test that create tempfile
-local pahtname = './tempfile_XXXXXX'
-local f, err = assert(mkstemp(pahtname))
+local tmpl = './tempfile_XXXXXX'
+local f, err, pathname = assert(mkstemp(tmpl))
 assert(f:close())
 assert.is_nil(err)
-assert(os.remove(pahtname))
-assert.not_equal(pahtname, './' .. 'lua_XXXXXX')
+assert.is_string(pathname)
+assert(os.remove(pathname))
+assert.not_equal(pathname, tmpl)
 
 -- test that returns an error
-f, err = mkstemp('./foo/bar/baz/tempfile')
+f, err, pathname = mkstemp('./foo/bar/baz/tempfile')
 assert.is_nil(f)
 assert.equal(err.type, errno[err.code])
+assert.is_nil(pathname)
+
+-- test that return ENAMETOOLONG error
+f, err, pathname = mkstemp('./' .. string.rep('f', 1024 * 8))
+assert.is_nil(f)
+assert.equal(err.type, errno.ENAMETOOLONG)
+assert.is_nil(pathname)
 
 -- test that throws an error
 err = assert.throws(mkstemp, {})
@@ -27,9 +35,10 @@ _G.io.tmpfile = function()
 end
 package.loaded['mkstemp'] = nil
 mkstemp = require('mkstemp')
-f, err = mkstemp('./tempfile2_XXXXXX')
+f, err, pathname = mkstemp('./tempfile2_XXXXXX')
 assert.is_nil(f)
 assert.equal(err.type, errno.EMFILE)
+assert.is_nil(pathname)
 
 -- test that throws an error if io.tmpfile function is not defined
 _G.io.tmpfile = nil

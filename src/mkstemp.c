@@ -21,6 +21,7 @@
  */
 
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -56,14 +57,27 @@ static inline void swap_fp(lua_State *L, FILE *fp)
 }
 
 static int REF_IO_TMPFILE = LUA_NOREF;
+static size_t TMPL_BUFSIZ = PATH_MAX;
+static char *TMPL_BUF     = NULL;
 
 static int mkstemp_lua(lua_State *L)
 {
-    char *tmpl = (char *)luaL_checkstring(L, 1);
-    int fd     = mkstemp(tmpl);
-    FILE *fp   = NULL;
+    size_t len = 0;
+    char *tmpl = (char *)luaL_checklstring(L, 1, &len);
+    int fd     = 0;
     int rc     = 0;
+    FILE *fp   = NULL;
 
+    if (len > TMPL_BUFSIZ) {
+        lua_pushnil(L);
+        errno = ENAMETOOLONG;
+        lua_errno_new(L, errno, "mkstemp");
+        return 2;
+    }
+    tmpl      = memcpy(TMPL_BUF, tmpl, len);
+    tmpl[len] = 0;
+
+    fd = mkstemp(tmpl);
     if (fd == -1) {
         lua_pushnil(L);
         lua_errno_new(L, errno, "mkstemp");
@@ -87,13 +101,25 @@ static int mkstemp_lua(lua_State *L)
         return 2;
     }
     swap_fp(L, fp);
-
-    return 1;
+    lua_pushnil(L);
+    lua_pushlstring(L, tmpl, len);
+    return 3;
 }
 
 LUALIB_API int luaopen_mkstemp(lua_State *L)
 {
+    long pathmax = pathconf(".", _PC_PATH_MAX);
+
     lua_errno_loadlib(L);
+
+    // set the maximum number of bytes in a pathname
+    if (pathmax != -1) {
+        TMPL_BUFSIZ = pathmax;
+    }
+    // allocate the buffer for mkstemp
+    TMPL_BUF = lua_newuserdata(L, TMPL_BUFSIZ + 1);
+    // holds until the state closes
+    luaL_ref(L, LUA_REGISTRYINDEX);
 
     REF_IO_TMPFILE = LUA_NOREF;
     lua_getglobal(L, "io");
