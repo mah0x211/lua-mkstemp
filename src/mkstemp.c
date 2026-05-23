@@ -23,10 +23,15 @@
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 // lua
-#include <lua_errno.h>
+#include <lauxlib.h>
+#include <lua.h>
+#include <lualib.h>
+// external libraries
+#include "lua_errno.h"
 
 static inline FILE *fd2fp(int fd)
 {
@@ -56,34 +61,45 @@ static inline void swap_fp(lua_State *L, FILE *fp)
 #endif
 }
 
-static int REF_IO_TMPFILE = LUA_NOREF;
-static size_t TMPL_BUFSIZ = PATH_MAX;
-static char *TMPL_BUF     = NULL;
-
 static int mkstemp_lua(lua_State *L)
 {
-    size_t len = 0;
-    char *tmpl = (char *)luaL_checklstring(L, 1, &len);
-    int fd     = 0;
-    int rc     = 0;
-    FILE *fp   = NULL;
+    size_t len     = 0;
+    char *tmpl     = (char *)luaL_checklstring(L, 1, &len);
+    char *buf      = NULL;
+    size_t bufsize = 0;
+    int fd         = 0;
+    int rc         = 0;
+    FILE *fp       = NULL;
 
-    if (len > TMPL_BUFSIZ) {
+    lua_settop(L, 1);
+    bufsize = (size_t)lua_tointeger(L, lua_upvalueindex(1));
+    buf     = (char *)lua_touserdata(L, lua_upvalueindex(2));
+    if (!buf) {
+        // no size limit to check
+        bufsize = len;
+        buf     = lua_newuserdata(L, bufsize + 1);
+    } else if (len > bufsize) {
         lua_pushnil(L);
         errno = ENAMETOOLONG;
         lua_errno_new(L, errno, "mkstemp");
         return 2;
     }
-    tmpl      = memcpy(TMPL_BUF, tmpl, len);
-    tmpl[len] = 0;
+    memcpy(buf, tmpl, len);
+    buf[len] = 0;
+    if (lua_gettop(L) > 1) {
+        // replace the template argument with the created buffer
+        lua_remove(L, 1);
+        lua_settop(L, 1);
+    }
 
-    fd = mkstemp(tmpl);
+    // create a temporary file
+    fd = mkstemp(buf);
     if (fd == -1) {
         lua_pushnil(L);
         lua_errno_new(L, errno, "mkstemp");
         return 2;
     }
-
+    // convert file descriptor to file pointer
     fp = fd2fp(fd);
     if (fp == NULL) {
         lua_pushnil(L);
@@ -91,18 +107,20 @@ static int mkstemp_lua(lua_State *L)
         return 2;
     }
 
-    lua_settop(L, 0);
-    lua_rawgeti(L, LUA_REGISTRYINDEX, REF_IO_TMPFILE);
+    // call io.tmpfile to create a temporary file and swap the file pointer with
+    // the one created by mkstemp
+    lua_pushvalue(L, lua_upvalueindex(3));
     lua_call(L, 0, LUA_MULTRET);
     rc = lua_gettop(L);
-    if (rc != 1) {
+    if (rc != 2) {
         lua_pushnil(L);
         lua_errno_new(L, errno, "mkstemp");
         return 2;
     }
+    // return the file pointer and the generated filename
     swap_fp(L, fp);
     lua_pushnil(L);
-    lua_pushlstring(L, tmpl, len);
+    lua_pushlstring(L, buf, len);
     return 3;
 }
 
@@ -114,26 +132,27 @@ LUALIB_API int luaopen_mkstemp(lua_State *L)
 
     // set the maximum number of bytes in a pathname
     if (pathmax != -1) {
-        TMPL_BUFSIZ = pathmax;
+        size_t bufsiz = (size_t)pathmax;
+        // upvalue 1: template buffer size
+        lua_pushinteger(L, (lua_Integer)bufsiz);
+        // upvalue 2: template buffer
+        lua_newuserdata(L, bufsiz + 1);
+    } else {
+        // _PC_PATH_MAX is indeterminate: no constraint on the length
+        // pathname upvalue 1: no size limit to check
+        lua_pushinteger(L, 0);
+        // upvalue 2: NULL signals no constraint on the length
+        lua_pushlightuserdata(L, NULL);
     }
-    // allocate the buffer for mkstemp
-    TMPL_BUF = lua_newuserdata(L, TMPL_BUFSIZ + 1);
-    // holds until the state closes
-    luaL_ref(L, LUA_REGISTRYINDEX);
-
-    REF_IO_TMPFILE = LUA_NOREF;
+    // upvalue 3: io.tmpfile function
     lua_getglobal(L, "io");
     if (lua_istable(L, -1)) {
-        lua_pushliteral(L, "tmpfile");
-        lua_rawget(L, -2);
+        lua_getfield(L, -1, "tmpfile");
         if (lua_isfunction(L, -1)) {
-            REF_IO_TMPFILE = luaL_ref(L, LUA_REGISTRYINDEX);
+            lua_remove(L, -2);
+            lua_pushcclosure(L, mkstemp_lua, 3);
+            return 1;
         }
     }
-    if (REF_IO_TMPFILE == LUA_NOREF) {
-        return luaL_error(L, "\"io.tmpfile\" function not found");
-    }
-
-    lua_pushcfunction(L, mkstemp_lua);
-    return 1;
+    return luaL_error(L, "\"io.tmpfile\" function not found");
 }
