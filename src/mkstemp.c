@@ -26,7 +26,11 @@
 #include <string.h>
 #include <unistd.h>
 // lua
-#include <lua_errno.h>
+#include <lauxlib.h>
+#include <lua.h>
+#include <lualib.h>
+// external libraries
+#include "lua_errno.h"
 
 static inline FILE *fd2fp(int fd)
 {
