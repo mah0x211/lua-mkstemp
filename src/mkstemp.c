@@ -20,18 +20,17 @@
  *  IN THE SOFTWARE.
  */
 
+// depend
+#include "lua_errno.h"
+// lua
+#include <lauxlib.h>
+#include <lualib.h>
+// system
 #include <errno.h>
-#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-// lua
-#include <lauxlib.h>
-#include <lua.h>
-#include <lualib.h>
-// external libraries
-#include "lua_errno.h"
 
 static inline FILE *fd2fp(int fd)
 {
